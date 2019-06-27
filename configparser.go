@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -231,7 +232,7 @@ func newMissingSectionHeaderError(filename string, lineno int, line string) *Mis
 var _UNSET = newInterpolation()
 
 type Interpolation interface {
-	beforeGet(parser ConfigParser, section, option, value string, defaults map[string][]string) (string, error)
+	beforeGet(parser ConfigParser, section, option, value string, defaults map[string]string) (string, error)
 	beforeSet(parser ConfigParser, section, option, value string) (string, error)
 	beforeRead(parser ConfigParser, section, option, value string) (string, error)
 	beforeWrite(parser ConfigParser, section, option, value string) (string, error)
@@ -239,7 +240,7 @@ type Interpolation interface {
 
 type interpolation struct{}
 
-func (i *interpolation) beforeGet(parser ConfigParser, section, option, value string, defaults map[string][]string) (string, error) {
+func (i *interpolation) beforeGet(parser ConfigParser, section, option, value string, defaults map[string]string) (string, error) {
 	return value, nil
 }
 
@@ -264,7 +265,7 @@ type basicInterpolation struct {
 	KeyCre *regexp.Regexp
 }
 
-func (b *basicInterpolation) beforeGet(parser ConfigParser, section, option, value string, defaults map[string][]string) (string, error) {
+func (b *basicInterpolation) beforeGet(parser ConfigParser, section, option, value string, defaults map[string]string) (string, error) {
 	L := []string{}
 	if err := b._interpolate_some(parser, option, L, value, section, defaults, 1); err != nil {
 		return "", err
@@ -281,7 +282,7 @@ func (b *basicInterpolation) beforeSet(parser ConfigParser, section, option, val
 	return value, nil
 }
 
-func (b *basicInterpolation) _interpolate_some(parser ConfigParser, option string, accum []string, rest string, section string, mapp map[string][]string, depth int) error {
+func (b *basicInterpolation) _interpolate_some(parser ConfigParser, option string, accum []string, rest string, section string, mapp map[string]string, depth int) error {
 	rawval, _ := parser.Get(section, option, true, nil, rest)
 	if depth > MaxInterpolationDepth {
 		return newInterpolationDepthError(option, section, rawval)
@@ -312,7 +313,7 @@ func (b *basicInterpolation) _interpolate_some(parser ConfigParser, option strin
 			}
 			in := false
 			for _, m := range v {
-				if m == "%" {
+				if m == '%' {
 					in = true
 					break
 				}
@@ -450,7 +451,9 @@ type ConfigParser interface {
 	}, string) error
 	read_string(string, string) error
 	//read_dict(map[string]map[string]string, string) error
+	Gett(section, option string) (string, error)
 	Get(section, option string, raw bool, vars map[string]string, fallback string) (string, error)
+	GetSectionMap() map[string]map[string]string
 	//_get()
 	//_get_conv()
 	//getint()
@@ -459,6 +462,7 @@ type ConfigParser interface {
 	//popitem() (string, string, error)
 	optionxform(string) string
 	HasOption(section, option string) bool
+	OptItems(section string, raw bool, vars map[string]string) ([][]string, error)
 	//set(section, option, value string) error
 	//write(fp io.Writer, space_around_delimiters bool)
 	//_write_section()
@@ -524,6 +528,54 @@ func (r *rawConfigParser) add_section(section string) error {
 func (r *rawConfigParser) has_section(section string) bool {
 	_, ok := r._sections[section]
 	return ok
+}
+
+func (r *rawConfigParser) OptItems(section string, raw bool, vars map[string]string) ([][]string, error) { // false, nil
+	d := map[string]string{}
+	for k, v := range r._defaults {
+		d[k] = v
+	}
+	if options, ok := r._sections[section]; !ok {
+		return nil, newNoSectionError(section)
+	} else {
+		for k, v := range options {
+			d[k] = v
+		}
+	}
+	origKeys := []string{}
+	for k := range d {
+		origKeys = append(origKeys, k)
+	}
+	sort.Strings(origKeys)
+	if len(vars) > 0 {
+		for k, v := range vars {
+			d[r.optionxform(k)] = v
+		}
+	}
+	valueGetter := func(option string) (string, error) {
+		return r._interpolation.beforeGet(r, section, option, d[option], d)
+	}
+	if raw {
+		valueGetter = func(option string) (string, error) {
+			if v, ok := d[option]; ok {
+				return v, nil
+			} else {
+				return "", fmt.Errorf("no key")
+			}
+		}
+	}
+
+	ret := [][]string{}
+	for _, option := range origKeys {
+		t := []string{option}
+		if s, err := valueGetter(option); err != nil {
+			return nil, err
+		} else {
+			t = append(t, s)
+		}
+		ret = append(ret, t)
+	}
+	return ret, nil
 }
 
 func (r *rawConfigParser) Options(section string) ([]string, error) {
@@ -634,6 +686,10 @@ func (r *rawConfigParser) read_dict(dictionary map[string]map[string]string, sou
 
 const UNSETS = "dfayiadgvaufdiljal"
 
+func (r *rawConfigParser) Gett(section, option string) (string, error) {
+	return r.Get(section, option, false, nil, UNSETS)
+}
+
 func (r *rawConfigParser) Get(section, option string, raw bool, vars map[string]string, fallback string) (string, error) { // false, none, UNSETS
 	d, err := r._unify_values(section, vars)
 	switch err.(type) {
@@ -659,6 +715,10 @@ func (r *rawConfigParser) Get(section, option string, raw bool, vars map[string]
 		return "", nil //TODO
 		//return r._interpolation.beforeGet(r, section, option, value, d)
 	}
+}
+
+func (r *rawConfigParser) GetSectionMap() map[string]map[string]string {
+	return r._sections
 }
 
 func (r *rawConfigParser) _get() {}
@@ -784,9 +844,8 @@ func (r *rawConfigParser) remove_section(section string) bool {
 func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 	elementsAdded := map[string]map[string]bool{}
 	var curSect map[string]string = nil
-	sectName := ""
-	optname := ""
-	indentLevel := 0
+	var sectName, optname string
+	var indentLevel int
 	var e interface {
 		error
 		append(int, string)
@@ -831,7 +890,7 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 		if value == "" {
 			if r._empty_lines_in_values {
 				if commentStart == 0 && curSect != nil && optname != "" && curSect[optname] != "" {
-					//curSect[optname] = append(curSect[optname], "")
+					curSect[optname] = ""
 				}
 			} else {
 				indentLevel = math.MaxInt32
@@ -843,7 +902,7 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 			curIndentLevel = r.NONSPACECRE.FindStringSubmatchIndex(line)[0]
 		}
 		if curSect != nil && optname != "" && curIndentLevel > indentLevel {
-			//curSect[optname] = append(curSect[optname], value)
+			curSect[optname] += value
 		} else {
 			indentLevel = curIndentLevel
 			if r.SECTCRE.MatchString(value) {
@@ -889,7 +948,7 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 					if r._strict && elementsAdded[sectName][optname] {
 						return newDuplicateOptionError(sectName, optname, fpname, lineno)
 					}
-					if elementsAdded[sectName] == nil{
+					if elementsAdded[sectName] == nil {
 						elementsAdded[sectName] = map[string]bool{}
 					}
 					elementsAdded[sectName][optname] = true

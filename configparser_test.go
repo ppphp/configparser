@@ -26,18 +26,39 @@ func basicTest(t *testing.T, cf ConfigParser, argument Argument) {
 	sort.Strings(E)
 	F := [][]string{{"baz", "qwe"}, {"foo", "bar3"}}
 	L := cf.Sections()
-	t.Logf("%++v", cf)
 	sort.Strings(L)
 	if !reflect.DeepEqual(L, E) {
 		t.Errorf("%v, %v", L, E)
 	}
-	L, err := cf.Options("Spacey Bar From The Beginning")
+	K, err := cf.OptItems("Spacey Bar From The Beginning", false, nil)
 	if err != nil {
 		return
 	}
 	sort.Strings(L)
-	if !reflect.DeepEqual(L, F) {
-		t.Errorf("%v, %v", L, F)
+	if !reflect.DeepEqual(K, F) {
+		t.Errorf("%v, %v", K, F)
+	}
+	L = []string{}
+	for section := range cf.GetSectionMap() {
+		L = append(L, section)
+	}
+	sort.Strings(L)
+	if !reflect.DeepEqual(L, E) {
+		t.Errorf("%v, %v", L, E)
+	}
+	// TODO items
+
+	if s, err := cf.Gett("Foo Bar", "foo"); err != nil || s != "bar1" {
+		t.Errorf("err %v, %v != %v", err, s, "bar1")
+	}
+	if s, err := cf.Gett("Spacey Bar", "foo"); err != nil || s != "bar2" {
+		t.Errorf("err %v, %v != %v", err, s, "bar2")
+	}
+	if s, err := cf.Gett("Spacey Bar From The Beginning", "foo"); err != nil || s != "bar3" {
+		t.Errorf("err %v, %v != %v", err, s, "bar3")
+	}
+	if s, err := cf.Gett("Spacey Bar From The Beginning", "baz"); err != nil || s != "qwe" {
+		t.Errorf("err %v, %v != %v", err, s, "qwe")
 	}
 }
 
@@ -94,12 +115,12 @@ var argument = Argument{
 	Interpolation:           _UNSET,
 }
 
-func TestStrict(t *testing.T) {
-	arg := argument
-	arg.Strict = true
-
-	testBasic(t, arg)
-}
+//func TestStrict(t *testing.T) {
+//	arg := argument
+//	arg.Strict = true
+//
+//	testBasic(t, arg)
+//}
 
 func TestNewRawConfigParser(t *testing.T) {
 
