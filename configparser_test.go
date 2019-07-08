@@ -19,7 +19,7 @@ func basicTest(t *testing.T, cf ConfigParser, argument Argument) {
 		"Spacey Bar From The Beginning",
 		"Types",
 	}
-	allow_no_value := argument.Allow_no_value
+	allow_no_value := argument.AllowNoValue
 	if allow_no_value {
 		E = append(E, "NoValue")
 	}
@@ -63,7 +63,7 @@ func basicTest(t *testing.T, cf ConfigParser, argument Argument) {
 }
 
 func testBasic(t *testing.T, argument Argument) {
-	const config_string = "[Foo Bar]\n" +
+	const configString = "[Foo Bar]\n" +
 		"foo%[1]sbar1\n" +
 		"[Spacey Bar]\n" +
 		"foo %[1]s bar2\n" +
@@ -91,13 +91,13 @@ func testBasic(t *testing.T, argument Argument) {
 		"boolean %[1]s NO\n" +
 		"123 %[2]s strange but acceptable\n"
 
-	cfgString := fmt.Sprintf(config_string, argument.Delimiters[0], argument.Delimiters[1], argument.Comment_prefixes[0], argument.Comment_prefixes[1])
-	if argument.Allow_no_value {
+	cfgString := fmt.Sprintf(configString, argument.Delimiters[0], argument.Delimiters[1], argument.CommentPrefixes[0], argument.CommentPrefixes[1])
+	if argument.AllowNoValue {
 		cfgString = cfgString + "[NoValue]\noption-without-value\n"
 	}
 
 	cf := NewRawConfigParser(argument)
-	if err := cf.read_string(cfgString, "<string>"); err != nil {
+	if err := cf.readString(cfgString, "<string>"); err != nil {
 		t.Errorf("%v", err)
 	}
 
@@ -105,23 +105,23 @@ func testBasic(t *testing.T, argument Argument) {
 }
 
 var argument = Argument{
-	Allow_no_value:          false,
-	Delimiters:              []string{"=", ":"},
-	Comment_prefixes:        []string{";", "#"},
-	Inline_comment_prefixes: []string{";", "#"},
-	Empty_lines_in_values:   true,
-	Strict:                  false,
-	Default_section:         DefaultSect,
-	Interpolation:           _UNSET,
+	AllowNoValue:          false,
+	Delimiters:            []string{"=", ":"},
+	CommentPrefixes:       []string{";", "#"},
+	InlineCommentPrefixes: []string{";", "#"},
+	EmptyLinesInValues:    true,
+	Strict:                false,
+	DefaultSection:        DefaultSect,
+	Interpolation:         _UNSET,
 }
 
-//func TestStrict(t *testing.T) {
-//	arg := argument
-//	arg.Strict = true
+func TestStrict(t *testing.T) {
+	arg := argument
+	arg.Strict = true
+
+	testBasic(t, arg)
+}
+
+//func TestNewRawConfigParser(t *testing.T) {
 //
-//	testBasic(t, arg)
 //}
-
-func TestNewRawConfigParser(t *testing.T) {
-
-}
