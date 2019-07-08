@@ -113,12 +113,11 @@ func (b *basicInterpolation) interpolateSome(parser ConfigParser, option string,
 				}
 			}
 			if in {
-				//if err := b._interpolate_some(parser, option, accum, v,
-				//	section, mapp, depth+1); err != nil {
-				//	return err
-				//}
+				if err := b.interpolateSome(parser, option, accum, v, section, mapp, depth+1); err != nil {
+					return err
+				}
 			} else {
-				//accum = append(accum, v)
+				accum = append(accum, v)
 			}
 		} else {
 			return newInterpolationSyntaxError(option, section, fmt.Sprintf("'%%' must be followed by '%%' or '(', found: %s", rest))
@@ -156,7 +155,7 @@ func (b *extendedInterpolation) beforeSet(parser ConfigParser, section, option, 
 	return value, nil
 }
 
-func (b *extendedInterpolation) interpolateSome(parser ConfigParser, option string, accum []string, rest string, section string, mapp map[string][]string, depth int) error {
+func (b *extendedInterpolation) interpolateSome(parser ConfigParser, option string, accum []string, rest string, section string, mapp map[string]string, depth int) error {
 	rawval, _ := parser.Get(section, option, true, nil, rest)
 	if depth > MaxInterpolationDepth {
 		return newInterpolationDepthError(option, section, rawval)
@@ -181,15 +180,15 @@ func (b *extendedInterpolation) interpolateSome(parser ConfigParser, option stri
 			}
 			path := strings.Split(b.KeyCre.FindAllStringSubmatch(rest, -1)[0][1], ":")
 			rest = rest[b.KeyCre.FindAllStringSubmatchIndex(rest, -1)[0][1]:]
-			//sect := section
-			var v []string = nil
+			sect := section
+			v := ""
 			if len(path) == 1 {
 				opt := parser.optionxform(path[0])
 				v = mapp[opt]
 			} else if len(path) == 1 {
-				//sect = path[0]
-				//opt := parser.optionxform(path[1])
-				//v, _ = parser.Get(sect, opt, true, nil, "")
+				sect = path[0]
+				opt := parser.optionxform(path[1])
+				v, _ = parser.Get(sect, opt, true, nil, "")
 			} else {
 				return newInterpolationSyntaxError(option, section, fmt.Sprintf("More than one ':' found: %v", rest))
 			}
@@ -199,18 +198,17 @@ func (b *extendedInterpolation) interpolateSome(parser ConfigParser, option stri
 
 			in := false
 			for _, m := range v {
-				if m == "%" {
+				if m == '%' {
 					in = true
 					break
 				}
 			}
 			if in {
-				//if err := b._interpolate_some(parser, option, accum, v,
-				//	section, mapp, depth+1); err != nil {
-				//	return err
-				//}
+				if err := b.interpolateSome(parser, option, accum, v, section, mapp, depth+1); err != nil {
+					return err
+				}
 			} else {
-				//accum = append(accum, v)
+				accum = append(accum, v)
 			}
 		} else {
 			return newInterpolationSyntaxError(option, section, fmt.Sprintf("'%%' must be followed by '%%' or '(', found: %v", rest))
@@ -286,9 +284,9 @@ type rawConfigParser struct {
 	defaults                                map[string]string
 	BooleanStates                           map[string]bool
 
-	_delimiters                            map[string]bool
+	delimiters                             map[string]bool
 	optcre                                 *regexp.Regexp
-	_strict                                bool
+	strict                                 bool
 	allowNoValue                           bool
 	emptyLinesInValues                     bool
 	defaultSection                         string
@@ -301,7 +299,7 @@ func (r *rawConfigParser) Defaults() map[string]string {
 }
 
 func (r *rawConfigParser) Sections() []string {
-	s := []string{}
+	var s []string
 	for k := range r.sections {
 		s = append(s, k)
 	}
@@ -310,7 +308,7 @@ func (r *rawConfigParser) Sections() []string {
 
 func (r *rawConfigParser) add_section(section string) error {
 	if section == r.defaultSection {
-		return fmt.Errorf("Invalid section name: %s", section)
+		return fmt.Errorf("invalid section name: %s", section)
 	}
 	if _, ok := r.sections[section]; ok {
 		return newDuplicateSectionError(section, nil, 0)
@@ -452,7 +450,7 @@ func (r *rawConfigParser) read_dict(dictionary map[string]map[string]string, sou
 		if err := r.add_section(section); err != nil {
 			switch err.(type) {
 			case DuplicateSectionError: //TODO, ValueError:
-				if _, ok := elementsAdd[section]; r._strict && ok {
+				if _, ok := elementsAdd[section]; r.strict && ok {
 					return err
 				}
 			default:
@@ -466,7 +464,7 @@ func (r *rawConfigParser) read_dict(dictionary map[string]map[string]string, sou
 			key = r.optionxform(key)
 			if value != "" {
 			}
-			if r._strict && elementsAdd[section][key] {
+			if r.strict && elementsAdd[section][key] {
 				return newDuplicateOptionError(section, key, source, 0)
 			}
 			elementsAdd[section][key] = true
@@ -506,8 +504,7 @@ func (r *rawConfigParser) Get(section, option string, raw bool, vars map[string]
 	if raw || !ok {
 		return value, nil
 	} else {
-		return "", nil //TODO
-		//return r.interpolation.beforeGet(r, section, option, value, d)
+		return r.interpolation.beforeGet(r, section, option, value, d)
 	}
 }
 
@@ -564,26 +561,26 @@ func (r *rawConfigParser) set(section, option, value string) error { // ""
 			return err
 		}
 	}
-	var sectdict map[string]string = nil
+	var sectDict map[string]string = nil
 	if section == "" || section == r.defaultSection {
-		sectdict = r.defaults
+		sectDict = r.defaults
 	} else {
 		ok := false
-		sectdict, ok = r.sections[section]
+		sectDict, ok = r.sections[section]
 		if !ok {
 			return newNoSectionError(section)
 		}
 	}
-	sectdict[r.optionxform(option)] = value
+	sectDict[r.optionxform(option)] = value
 	return nil
 }
 
 //func (r *rawConfigParser) write(fp io.Writer, space_around_delimiters bool) { // true
 //	d := ""
 //	if space_around_delimiters {
-//		d = fmt.Sprintf(" %v", r._delimiters[0])
+//		d = fmt.Sprintf(" %v", r.delimiters[0])
 //	} else {
-//		d = r._delimiters[0]
+//		d = r.delimiters[0]
 //	}
 //	if len(r.defaults) > 0 {
 //		r._write_section(fp, r.default_section, r.defaults, d)
@@ -593,13 +590,13 @@ func (r *rawConfigParser) set(section, option, value string) error { // ""
 //	}
 //}
 
-func (r *rawConfigParser) _write_section(fp io.Writer, section_name string, section_items map[string]string, delimiter string) error {
-	if _, err := fp.Write([]byte(fmt.Sprintf("[%v]\n", section_name))); err != nil {
+func (r *rawConfigParser) _write_section(fp io.Writer, sectionName string, sectionItems map[string]string, delimiter string) error {
+	if _, err := fp.Write([]byte(fmt.Sprintf("[%v]\n", sectionName))); err != nil {
 		return err
 	}
 
-	for key, value := range section_items {
-		value, _ = r.interpolation.beforeWrite(r, section_name, key, value)
+	for key, value := range sectionItems {
+		value, _ = r.interpolation.beforeWrite(r, sectionName, key, value)
 		if value != "" || !r.allowNoValue {
 			value = delimiter + strings.Replace(value, "\n", "\n\t", -1)
 		} else {
@@ -642,7 +639,7 @@ func (r *rawConfigParser) remove_section(section string) bool {
 	return existed
 }
 
-func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
+func (r *rawConfigParser) _read(fp io.Reader, fpName string) error {
 	elementsAdded := map[string]map[string]bool{}
 	var curSect map[string]string = nil
 	var sectName, optname string
@@ -715,8 +712,8 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 					}
 				}
 				if _, ok := r.sections[sectName]; ok {
-					if _, ok := elementsAdded[sectName]; r._strict && ok {
-						return newDuplicateSectionError(sectName, fpname, lineno)
+					if _, ok := elementsAdded[sectName]; r.strict && ok {
+						return newDuplicateSectionError(sectName, fpName, lineno)
 					}
 					curSect = r.sections[sectName]
 					elementsAdded[sectName] = map[string]bool{}
@@ -729,7 +726,7 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 				}
 				optname = ""
 			} else if curSect == nil {
-				return newMissingSectionHeaderError(fpname, lineno, line)
+				return newMissingSectionHeaderError(fpName, lineno, line)
 			} else {
 				mo := r.optcre.FindStringSubmatch(value)
 				if r.optcre.MatchString(value) {
@@ -743,11 +740,11 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 						}
 					}
 					if optname == "" {
-						e = r._handle_error(e, fpname, lineno, line)
+						e = r._handle_error(e, fpName, lineno, line)
 					}
 					optname = r.optionxform(strings.TrimRightFunc(optname, unicode.IsSpace))
-					if r._strict && elementsAdded[sectName][optname] {
-						return newDuplicateOptionError(sectName, optname, fpname, lineno)
+					if r.strict && elementsAdded[sectName][optname] {
+						return newDuplicateOptionError(sectName, optname, fpName, lineno)
 					}
 					if elementsAdded[sectName] == nil {
 						elementsAdded[sectName] = map[string]bool{}
@@ -760,7 +757,7 @@ func (r *rawConfigParser) _read(fp io.Reader, fpname string) error {
 						curSect[optname] = ""
 					}
 				} else {
-					e = r._handle_error(e, fpname, lineno, line)
+					e = r._handle_error(e, fpName, lineno, line)
 				}
 			}
 		}
@@ -797,12 +794,12 @@ func (r *rawConfigParser) _read_defaults(defaults map[string]string) {
 func (r *rawConfigParser) _handle_error(exc interface {
 	error
 	append(int, string)
-}, fpname string, lineno int, line string) interface {
+}, fpName string, lineno int, line string) interface {
 	error
 	append(int, string)
 } {
 	if exc == nil {
-		exc = newParsingError(fpname)
+		exc = newParsingError(fpName)
 	}
 	exc.append(lineno, line)
 	return exc
@@ -872,11 +869,11 @@ func NewRawConfigParser(argument Argument) *rawConfigParser { // DefaultArgument
 	r.value = map[string]string{}
 	r.sections = map[string]map[string]string{}
 	r.defaults = map[string]string{}
-	r._delimiters = map[string]bool{}
+	r.delimiters = map[string]bool{}
 	for _, d := range delimiters {
-		r._delimiters[d] = true
+		r.delimiters[d] = true
 	}
-	if len(r._delimiters) == 2 && r._delimiters["="] && r._delimiters[":"] {
+	if len(r.delimiters) == 2 && r.delimiters["="] && r.delimiters[":"] {
 		if allowNoValue {
 			r.optcre = r.OPTCRE_NV
 		} else {
@@ -902,7 +899,7 @@ func NewRawConfigParser(argument Argument) *rawConfigParser { // DefaultArgument
 	for _, c := range inlineCommentPrefixes {
 		r.inlineCommentPrefixes[c] = true
 	}
-	r._strict = strict
+	r.strict = strict
 	r.allowNoValue = allowNoValue
 	r.emptyLinesInValues = emptyLinesInValues
 	r.defaultSection = defaultSection
